@@ -1,0 +1,15 @@
+vision_agent:
+  agent_id: "your-agent-id-here"
+  api_key: "your-api-key-here"
+
+stego_agent:
+  agent_id: "your-agent-id-here"
+  api_key: "your-api-key-here"
+
+text_agent:
+  agent_id: "your-agent-id-here"
+  api_key: "your-api-key-here"
+
+coordinator_agent:
+  agent_id: "your-agent-id-here"
+  api_key: "your-api-key-here"

@@ -1,0 +1,43 @@
+# Учётные данные и локальные настройки
+.env
+.env.*
+!.env.example
+agent_config.yaml
+
+# Python кэш и артефакты
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+env/
+
+# Логи и временные файлы
+*.log
+test_outputs/
+fake_screenshot.png
+
+# IDE и OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

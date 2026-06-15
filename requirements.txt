@@ -1,0 +1,28 @@
+# ScamShield — Stego/Forensics Agent Tool
+# Install with: pip install -r requirements.txt
+
+# ── Forensics engine (analyzer.py) dependencies ───────────────────────────────
+numpy>=1.24
+Pillow>=10.0
+oletools>=0.60
+PyPDF2>=3.0
+scipy>=1.11
+pydub>=0.25
+mutagen>=1.47
+rarfile>=4.1
+Levenshtein>=0.23
+
+# ── LangChain integration ─────────────────────────────────────────────────────
+langchain>=0.2
+langchain-core>=0.2
+
+# ── Vision Fraud Detector (Agent 1) ───────────────────────────────────────────
+anthropic>=0.30
+python-dotenv>=1.0
+requests>=2.31.0
+PyYAML>=6.0
+
+# ── Band SDK Multi-Agent Integration ──────────────────────────────────────────
+band-sdk[langgraph]
+langchain-openai
+langchain-anthropic
