@@ -1,16 +1,46 @@
-# ScamShield - Multimodal Fraud Detection REST API
+# ScamShield — Multimodal Fraud Detection REST API
 
-ScamShield is a multi-agent fraud detection application updated for the **AMD Developer Hackathon: ACT II**. 
-It exposes a clean, async FastAPI REST API that inspects text, links, documents, and images for phishing, social engineering, and forensic modifications (such as steganography).
+**ScamShield** is a production-ready fraud detection system built for the **AMD Developer Hackathon: ACT II**.  
+It exposes an async FastAPI REST API that inspects text, URLs, documents, and images for phishing, social engineering, and forensic modifications — with a smart hybrid AI router that balances cost, speed, and accuracy.
 
-## 🚀 Key Innovations & Features
-1. **Hybrid Provider Routing Controller**: Intelligently inspects incoming files and text queries, routing lightweight tasks to local models (Ollama with `gemma:2b` or similar) and complex visual/long threat-related queries to remote APIs like **Google Gemma 4 31B IT** (via Fireworks AI, running on AMD Instinct GPUs), Claude, or Gemini to minimize token consumption and infrastructure costs.
-2. **Battle-Tested Forensic Scanner**: Built-in 9 parallel deep-scanning forensic tests (LSB steganography analysis, histogram combing checks, trailing data, file entropy, Word VBA macro scans, active PDF script analysis, and threat keyword matching).
-3. **Levenshtein Banking Typosquatting**: High-performance domain similarity checking targeted at Central Asian/Uzbek banking platforms to catch malicious redirects (e.g. `kap1talbank.uz`).
+---
+
+## AI Providers
+
+| Task | Model | Status |
+|------|-------|--------|
+| Text analysis (primary) | DeepSeek V4 Flash (Fireworks AI, AMD Instinct GPUs) | ✅ Active |
+| Vision analysis (primary) | Minimax M3 (Fireworks AI, AMD Instinct GPUs) | ✅ Active |
+| Text/Vision (Gemma path) | Google Gemma 4 31B IT (Fireworks AI) | 🔧 Code-ready, pending model access on current API tier |
+| Offline fallback | Google Gemma 4 12B (local Ollama in Docker) | ✅ Active, $0 cost |
+
+The router attempts **Google Gemma 4 31B IT** first; if unavailable (HTTP 404), it automatically falls back to **DeepSeek V4 Flash** (text) / **Minimax M3** (vision) on Fireworks AI, then to **local Ollama** if no API key or internet connection is present.
+
+> **Note on Gemma Prize eligibility:** The codebase is fully written to use Google Gemma 4 31B IT as the primary model. The fallback to DeepSeek/Minimax is triggered only because the current Fireworks API tier does not expose Gemma models. If the tier is upgraded or Gemma access is granted, the system will automatically route all requests through Gemma with zero code changes.
+
+---
+
+## 🚀 Key Features
+
+1. **Hybrid Provider Routing Controller** — Inspects incoming requests and intelligently routes lightweight tasks to a free local Ollama model, and complex visual/threat queries to cloud AI (Fireworks AI on AMD Instinct GPUs). Minimizes API costs while maintaining high accuracy.
+
+2. **9-Probe Forensic Scanner** — Built-in parallel deep-scanning engine:
+   - LSB steganography detection
+   - Histogram combing analysis
+   - Trailing data / appended payload detection
+   - File entropy anomaly scoring
+   - Word VBA macro extraction (AutoExec)
+   - PDF JavaScript / embedded action scanning
+   - Threat keyword matching
+   - EXIF metadata inspection
+   - File signature validation
+
+3. **Levenshtein Typosquatting Engine** — High-performance domain similarity checking targeted at Central Asian banking platforms (Kapitalbank, Click, Payme, Uzcard, Humo) to catch phishing redirects like `kap1talbank.uz` or `payme-verif.uz`.
 
 ---
 
 ## 📐 Architecture
+
 ```
                   ┌────────────────────────────────────────┐
                   │          Client API Request            │
@@ -27,11 +57,12 @@ It exposes a clean, async FastAPI REST API that inspects text, links, documents,
 │   Hybrid LLM Controller   │                         │  Forensics  │
 └──────┬─────────────┬──────┘                         │   Engine    │
        │             │                                └──────┬──────┘
-       ▼ (Routed)    ▼ (Routed)                              ▼
+       ▼ (Cloud)     ▼ (Local)                               ▼
 ┌──────────────┐ ┌──────────────┐                    • LSB Stego Check
-│  Fireworks / │ │ Local Ollama │                    • Histogram Comb
-│ Claude/Gemini│ │ (gemma:2b)   │                    • PDF JS Check
-└──────────────┘ └──────────────┘                    • VBA AutoExec
+│ Fireworks AI │ │ Local Ollama │                    • Histogram Comb
+│ (DeepSeek /  │ │ (Gemma 4 12B)│                    • PDF JS Check
+│  Minimax M3) │ │    FREE      │                    • VBA AutoExec
+└──────────────┘ └──────────────┘                    • EXIF & Entropy
 ```
 
 ---
@@ -39,45 +70,92 @@ It exposes a clean, async FastAPI REST API that inspects text, links, documents,
 ## 🛠️ Setup & Running
 
 ### 1. Configure Credentials
-Copy `.env.example` to `.env` in the root `scamshield_fastapi` directory:
 ```bash
 cp .env.example .env
 ```
-Fill in your `FIREWORKS_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY`. If no keys are set, the router falls back to local execution.
+Fill in your `FIREWORKS_API_KEY`. If no key is set, the router falls back to local Ollama execution automatically.
 
 ### 2. Run with Docker Compose (Recommended)
-This launches the FastAPI application and a local Ollama container. On startup, the container automatically pulls the configured local model (`gemma:2b` by default) in the background.
+This launches the FastAPI app and a local Ollama container. On startup, the entrypoint script automatically pulls `gemma4:12b` in the background.
 
 ```bash
 docker compose up --build
 ```
-The API is available at `http://localhost:8000`. Access `http://localhost:8000/docs` for the interactive Swagger UI.
+
+The API is available at `http://localhost:8000`.  
+Interactive Swagger UI: `http://localhost:8000/docs`
 
 ### 3. Running Tests
-You can run automated endpoints tests inside the docker environment:
 ```bash
 docker compose run app pytest
 ```
 
 ---
 
-## 📡 API Reference & cURL Examples
+## 📡 API Endpoints & Examples
 
 ### 1. Full Routed Scan (Image + Text)
 ```bash
 curl -X POST "http://localhost:8000/analyze/full" \
-  -F "file=@fake_screenshot.png" \
+  -F "file=@screenshot.png" \
   -F "text=Urgent verify your card details at kap1talbank.uz"
 ```
 
-### 2. Stego/Forensics Scan Only
+### 2. Text & URL Phishing Scan
+```bash
+curl -X POST "http://localhost:8000/analyze/text" \
+  -F "text=Urgent! Send \$500 to verify your account at kap1talbank.uz within 1 hour"
+```
+
+### 3. Vision Analysis (Screenshot / Document)
+```bash
+curl -X POST "http://localhost:8000/analyze/vision" \
+  -F "file=@bank_transfer.png"
+```
+
+### 4. Steganography / Forensics Scan
 ```bash
 curl -X POST "http://localhost:8000/analyze/stego" \
   -F "file=@suspicious_document.pdf"
 ```
 
-### 3. Text & URL Phishing Scan
-```bash
-curl -X POST "http://localhost:8000/analyze/text" \
-  -F "text=Urgent! Click here: http://payme-verif.uz"
+---
+
+## 📁 Project Structure
+
 ```
+scamshield_fastapi/
+├── app/
+│   ├── main.py          # FastAPI application & endpoint handlers
+│   ├── models.py         # Pydantic request/response schemas
+│   └── router.py         # Hybrid LLM provider routing logic
+├── tools/
+│   ├── llm_provider.py   # Fireworks AI / Ollama / Gemini backends
+│   ├── vision_tool.py    # Image analysis via multimodal LLMs
+│   ├── text_url_tool.py  # Text & URL phishing analysis
+│   └── stego_tool.py     # Steganography & forensic scanning
+├── analyzer.py           # Core forensic engine (9 parallel probes)
+├── database.py           # SQLite scan history storage
+├── Dockerfile            # Multi-stage container build
+├── docker-compose.yml    # App + Ollama orchestration
+├── entrypoint.sh         # Container startup (Ollama wait + model pull)
+├── requirements.txt      # Python dependencies
+└── .env.example          # Environment variable template
+```
+
+---
+
+## 🔧 Tech Stack
+
+- **Runtime:** Python 3.11, FastAPI, Uvicorn
+- **Cloud AI:** Fireworks AI (DeepSeek V4 Flash, Minimax M3, Gemma 4 31B IT ready)
+- **Local AI:** Ollama with Google Gemma 4 12B
+- **Infrastructure:** Docker Compose, AMD Instinct GPUs (via Fireworks AI)
+- **Forensics:** Pillow, python-docx, PyPDF2, numpy
+- **Database:** SQLite (scan history)
+
+---
+
+## License
+
+MIT
