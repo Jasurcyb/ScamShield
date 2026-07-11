@@ -1,6 +1,7 @@
-# Environment & secrets
+# Environment & Secrets
 .env
 .env.local
+agent_config.yaml
 
 # Python
 __pycache__/
@@ -11,21 +12,19 @@ venv/
 *.egg-info/
 
 # IDE
-.idea/
 .vscode/
-*.swp
-*.swo
+.idea/
 
-# OS
+# Logs & temp
+*.log
+test_outputs/
+
+# OS files
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-
 # Test artifacts
 fake_screenshot.png
-test_outputs/
 
-# Database
-*.db
+# Docker volumes
+ollama_data/
