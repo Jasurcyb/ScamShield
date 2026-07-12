@@ -75,7 +75,13 @@ cp .env.example .env
 ```
 Fill in your `FIREWORKS_API_KEY`. If no key is set, the router falls back to local Ollama execution automatically.
 
-### 2. Run with Docker Compose (Recommended)
+### 2. Pull Pre-built Image
+```bash
+docker pull ghcr.io/jasurcyb/scamshield-amd-act2:latest
+docker run -p 8000:8000 --env-file .env ghcr.io/jasurcyb/scamshield-amd-act2:latest
+```
+
+### 3. Run with Docker Compose (Recommended)
 This launches the FastAPI app and a local Ollama container. On startup, the entrypoint script automatically pulls `gemma4:12b` in the background.
 
 ```bash
@@ -85,7 +91,7 @@ docker compose up --build
 The API is available at `http://localhost:8000`.  
 Interactive Swagger UI: `http://localhost:8000/docs`
 
-### 3. Running Tests
+### 4. Running Tests
 ```bash
 docker compose run app pytest
 ```
