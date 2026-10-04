@@ -38,10 +38,10 @@ async def test_tools():
     print(f"  Summary   : {text_res['summary']}")
     print(f"  Findings  : {text_res['text_findings']}")
 
-    print("\n=== Testing Vision Fraud Tool (Requires API Keys / Ollama) ===")
+    print("\n=== Testing Vision Fraud Tool (Requires a Cloud API Key) ===")
     if os.path.exists(test_file):
         print(f"Running vision_fraud_tool on '{test_file}'...")
-        # Note: If no API keys or local Ollama are available, this will return an error dictionary gracefully.
+        # Note: Without a configured cloud key this returns an error dictionary gracefully.
         vision_res = await vision_fraud_tool(test_file)
         print("Vision Result:")
         print(f"  Risk Level: {vision_res['risk_level']}")

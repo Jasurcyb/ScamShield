@@ -1,0 +1,30 @@
+[
+  {
+    "id": "phishing-uz-bank-typo",
+    "input_type": "text",
+    "content": "Shoshilinch! Kartangiz bloklandi. Tasdiqlash uchun kap1talbank.uz ga kiring.",
+    "expected_min_risk": "high",
+    "reason": "Банковский typosquatting и давление срочностью."
+  },
+  {
+    "id": "safe-announcement",
+    "input_type": "text",
+    "content": "Встреча команды состоится завтра в 10:00 в офисе.",
+    "expected_max_risk": "low",
+    "reason": "Обычное нейтральное сообщение без ссылки и запроса данных."
+  },
+  {
+    "id": "punycode-link",
+    "input_type": "text",
+    "content": "Проверьте счёт по ссылке https://xn--payme-9db.uz/login",
+    "expected_min_risk": "high",
+    "reason": "Punycode-домен может маскировать подмену бренда."
+  },
+  {
+    "id": "dangerous-archive-name",
+    "input_type": "file",
+    "content": "archive-with-photo.jpg.exe",
+    "expected_min_risk": "high",
+    "reason": "Двойное расширение и исполняемый файл внутри архива."
+  }
+]

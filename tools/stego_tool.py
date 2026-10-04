@@ -34,27 +34,78 @@ def _classify_risk(danger_score: int, is_critical: bool) -> str:
     return "low"
 
 
+_SUMMARY_PACKS: dict[str, dict[str, object]] = {
+    "en": {
+        "headlines": {
+            "critical": "CRITICAL THREAT DETECTED.",
+            "high":     "High-risk indicators found.",
+            "medium":   "Suspicious activity detected.",
+            "low":      "File appears clean.",
+        },
+        "lsb": "Hidden data detected via LSB steganography analysis (statistically non-random pixel noise in blue channel).",
+        "hist": "Histogram comb-effect detected — a classic sign of LSB embedding that distorts channel value distribution.",
+        "trailing": "Appended data found beyond the file's EOF marker ({sz} bytes) — possible polyglot or stego container.",
+        "ctf": "{count} CTF-style flag(s) extracted from file content (e.g. 'flag{{...}}' patterns). This strongly suggests the file was crafted for a capture-the-flag challenge.",
+        "threats": "Threat keywords matched in file data: {words}.",
+        "macro_autoexec": "VBA macro with AutoExec trigger found — code will execute automatically when the document is opened.",
+        "macro_plain": "VBA macros detected in the Office document. Manual review recommended before opening.",
+        "pdf": "Active JavaScript or embedded files found inside the PDF — potential for drive-by execution.",
+        "archive": "Archive contains executable files or double-extension tricks ({details}).",
+    },
+    "ru": {
+        "headlines": {
+            "critical": "ОБНАРУЖЕНА КРИТИЧЕСКАЯ УГРОЗА.",
+            "high":     "Найдены индикаторы высокого риска.",
+            "medium":   "Обнаружена подозрительная активность.",
+            "low":      "Файл выглядит чистым.",
+        },
+        "lsb": "Обнаружены скрытые данные (LSB-стеганография: неестественно равномерный шум в синем канале).",
+        "hist": "Обнаружен «гребёночный» эффект гистограммы — классический признак LSB-внедрения.",
+        "trailing": "Найдены данные после маркера конца файла ({sz} байт) — возможен полиглот- или стегано-контейнер.",
+        "ctf": "Извлечены CTF-флаги ({count} шт., шаблон 'flag{{...}}'). Похоже, файл подготовлен для CTF-соревнования.",
+        "threats": "Совпадения с ключевыми словами угроз: {words}.",
+        "macro_autoexec": "Найден VBA-макрос с автозапуском — код выполнится при открытии документа.",
+        "macro_plain": "В документе есть VBA-макросы. Перед открытием рекомендуется ручная проверка.",
+        "pdf": "В PDF найдены активный JavaScript или вложения — возможна скрытая загрузка файлов.",
+        "archive": "В архиве исполняемые файлы или приём с двойным расширением ({details}).",
+    },
+    "uz": {
+        "headlines": {
+            "critical": "JUDA XAVFLI TAHDIT ANIQLANDI.",
+            "high":     "Yuqori xavf belgilari topildi.",
+            "medium":   "Shubhali faollik aniqlandi.",
+            "low":      "Fayl toza ko‘rinadi.",
+        },
+        "lsb": "Yashirin ma‘lumotlar aniqlandi (LSB-steganografiya: ko‘k kanalda tabiiy bo‘lmagan bir tekis shovqin).",
+        "hist": "Gistogramma «tarak» effekti aniqlandi — LSB qo‘yishning klassik belgisi.",
+        "trailing": "Fayl oxiri belgisidan keyin ma‘lumot topildi ({sz} bayt) — polyglot yoki stego-konteyner bo‘lishi mumkin.",
+        "ctf": "Fayl tarkibidan CTF-bayroqlar ajratib olindi ({count} ta, 'flag{{...}}' namunasi). Fayl CTF uchun tayyorlangan ko‘rinadi.",
+        "threats": "Tahdid kalit so‘zlari bilan mosliklar: {words}.",
+        "macro_autoexec": "AutoExec triggerli VBA makrosi topildi — hujjat ochilganda kod avtomatik ishga tushadi.",
+        "macro_plain": "Hujjatda VBA makrolari mavjud. Ochishdan oldin qo‘lda tekshirish tavsiya etiladi.",
+        "pdf": "PDF ichida faol JavaScript yoki biriktirilgan fayllar topildi — yashirin yuklab olish xavfi bor.",
+        "archive": "Arxivda bajariladigan fayllar yoki ikki kengaytma taktikasi mavjud ({details}).",
+    },
+}
+
+
 def _build_summary(
     risk_level: str,
     lsb_findings: dict,
     ctf_flags: list,
     threat_words: list,
     macro_analysis: dict,
+    language: str = "en",
 ) -> str:
     """
-    Produce a concise, professional English summary suitable for hackathon judges.
+    Produce a concise summary suitable for end users, in the requested language.
     Avoids raw technical dumps — translates findings into plain language.
     """
+    pack = _SUMMARY_PACKS.get(language) or _SUMMARY_PACKS["en"]
     parts: list[str] = []
 
     # Risk headline
-    risk_headlines = {
-        "critical": "CRITICAL THREAT DETECTED.",
-        "high":     "High-risk indicators found.",
-        "medium":   "Suspicious activity detected.",
-        "low":      "File appears clean.",
-    }
-    parts.append(risk_headlines[risk_level])
+    parts.append(pack["headlines"][risk_level])
 
     # LSB / steganography
     lsb_status = lsb_findings.get("lsb_anomaly", {}).get("status", "ok")
@@ -62,37 +113,21 @@ def _build_summary(
     trailing_status = lsb_findings.get("trailing_data", {}).get("status", "ok")
 
     if lsb_status != "ok":
-        parts.append(
-            "Hidden data detected via LSB steganography analysis "
-            "(statistically non-random pixel noise in blue channel)."
-        )
+        parts.append(pack["lsb"])
     if hist_status != "ok":
-        parts.append(
-            "Histogram comb-effect detected — a classic sign of LSB embedding "
-            "that distorts channel value distribution."
-        )
+        parts.append(pack["hist"])
     if trailing_status not in ("ok", "error"):
         trailing_sz = lsb_findings.get("trailing_data", {}).get("trailing_size", 0)
-        parts.append(
-            f"Appended data found beyond the file's EOF marker "
-            f"({trailing_sz} bytes) — possible polyglot or stego container."
-        )
+        parts.append(pack["trailing"].format(sz=trailing_sz))
 
     # CTF flags
     if ctf_flags:
-        count = len(ctf_flags)
-        parts.append(
-            f"{count} CTF-style flag{'s' if count > 1 else ''} extracted from file content "
-            f"(e.g. 'flag{{...}}' patterns). This strongly suggests the file was crafted "
-            f"for a capture-the-flag challenge."
-        )
+        parts.append(pack["ctf"].format(count=len(ctf_flags)))
 
     # Threat keywords
     if threat_words:
-        parts.append(
-            f"Threat keyword{'s' if len(threat_words) > 1 else ''} matched in file data: "
-            f"{', '.join(threat_words[:5])}{'...' if len(threat_words) > 5 else ''}."
-        )
+        matched = ", ".join(threat_words[:5]) + ("..." if len(threat_words) > 5 else "")
+        parts.append(pack["threats"].format(words=matched))
 
     # Macro / script analysis
     macro_status = macro_analysis.get("word_macro", {}).get("status", "ok")
@@ -102,29 +137,17 @@ def _build_summary(
     if macro_status != "ok":
         details = macro_analysis["word_macro"].get("details", "")
         if "AutoExec" in details or "автозапуск" in details.lower():
-            parts.append(
-                "VBA macro with AutoExec trigger found — code will execute automatically "
-                "when the document is opened."
-            )
+            parts.append(pack["macro_autoexec"])
         else:
-            parts.append(
-                "VBA macros detected in the Office document. "
-                "Manual review recommended before opening."
-            )
+            parts.append(pack["macro_plain"])
 
     if pdf_status != "ok":
-        parts.append(
-            "Active JavaScript or embedded files found inside the PDF — "
-            "potential for drive-by execution."
-        )
+        parts.append(pack["pdf"])
 
     if archive_status not in ("ok", "error"):
         arch_details = macro_analysis["archive"].get("details", "")
         if "danger" in macro_analysis["archive"].get("status", ""):
-            parts.append(
-                "Archive contains executable files or double-extension tricks "
-                f"({arch_details[:120]})."
-            )
+            parts.append(pack["archive"].format(details=arch_details[:120]))
 
     return " ".join(parts)
 
@@ -203,9 +226,9 @@ async def _run_all_analyses(file_path: str) -> dict[str, Any]:
 
 # ── Standalone Async Function (LangChain @tool removed) ─────────────────────────
 
-async def stego_security_tool(file_path: str) -> dict:
+async def stego_security_tool(file_path: str, language: str = "en") -> dict:
     """
-    Forensic steganography & threat scanner.
+    Forensic steganography & threat scanner. The summary is written in `language`.
     """
     if not os.path.isfile(file_path):
         return {
@@ -261,10 +284,18 @@ async def stego_security_tool(file_path: str) -> dict:
     )
 
     is_critical = verdict_status == "ОПАСНО" or bool(ctf_flags) or bool(threat_words)
+    # CTF-like strings and suspicious words warrant review, but they are not
+    # proof of an active threat on their own. Reserve the critical verdict for
+    # a confirmed malicious archive or an auto-executing macro.
+    if ctf_flags or threat_words:
+        archive_is_dangerous = macro_analysis["archive"].get("status") == "danger"
+        macro_details = macro_analysis["word_macro"].get("details", "")
+        is_critical = archive_is_dangerous or "AutoExec" in macro_details
+
     risk_level  = _classify_risk(danger_score, is_critical)
 
     summary = _build_summary(
-        risk_level, lsb_findings, ctf_flags, threat_words, macro_analysis
+        risk_level, lsb_findings, ctf_flags, threat_words, macro_analysis, language
     )
 
     return {

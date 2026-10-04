@@ -1,0 +1,17 @@
+# Never bake secrets or local junk into the image
+.git
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp/
+.test_artifacts/
+.pip-audit-cache/
+.mimosa/
+*.log
+Dockerfile
+docker-compose.yml

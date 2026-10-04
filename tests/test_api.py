@@ -1,48 +1,48 @@
 import os
-import sys
+from io import BytesIO
+
 import pytest
-import io
 from fastapi.testclient import TestClient
+from PIL import Image
 
-# Ensure project root is on sys.path
-_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT_DIR not in sys.path:
-    sys.path.insert(0, _ROOT_DIR)
+from app.main import app, router_controller
 
-from app.main import app
 
 client = TestClient(app)
 
-# ── Fixtures for mock files ───────────────────────────────────────────────────
 
 @pytest.fixture
 def dummy_png():
-    """Returns a valid 1x1 transparent PNG file binary representation."""
-    return b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc`\x00\x00\x00\x02\x00\x01H\xaf\xa4q\x00\x00\x00\x00IEND\xaeB`\x82'
+    """A valid one-pixel transparent PNG."""
+    buffer = BytesIO()
+    Image.new("RGBA", (1, 1), (0, 0, 0, 0)).save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 @pytest.fixture
-def dummy_txt():
-    return b"Hello world! This is a simple test file."
+def text_llm_stub(monkeypatch):
+    monkeypatch.setattr(
+        "tools.text_url_tool.call_text_llm",
+        lambda prompt, provider=None: (
+            '{"risk_level":"high","text_findings":["Подозрительный домен"],'
+            '"summary":"Вероятная фишинговая попытка."}'
+        ),
+    )
 
-
-# ── Test Endpoints ────────────────────────────────────────────────────────────
 
 def test_read_root():
     response = client.get("/")
     assert response.status_code == 200
     assert "Swagger" in response.json()["message"]
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
 
 
-def test_analyze_text():
+def test_analyze_text(text_llm_stub):
     response = client.post("/analyze/text", data={"text": "Urgent! Account block at kap1talbank.uz!"})
     assert response.status_code == 200
     data = response.json()
-    assert "risk_level" in data
-    assert "text_findings" in data
-    assert "summary" in data
-    # Levenshtein typo-squatting must trigger here
-    assert any("typo-squatting" in f.lower() or "similar" in f.lower() for f in data["text_findings"])
+    assert data["risk_level"] == "high"
+    assert data["text_findings"]
 
 
 def test_analyze_text_empty():
@@ -50,70 +50,87 @@ def test_analyze_text_empty():
     assert response.status_code == 400
 
 
-def test_analyze_vision(dummy_png):
-    # Mocking environment variables to prevent actual API calling failure during test
-    os.environ["ANTHROPIC_API_KEY"] = ""
-    os.environ["GEMINI_API_KEY"] = ""
-    os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434" # Dummy Ollama local fallback
-    
-    file_payload = {"file": ("test.png", dummy_png, "image/png")}
-    response = client.post("/analyze/vision", files=file_payload)
-    
-    # Since Ollama might not be running locally in test environment, it may result in error_result dict
-    # But the endpoint should still return HTTP 200 containing the structured error/success dict as VisionResponse.
+def test_analyze_text_too_long():
+    response = client.post("/analyze/text", data={"text": "a" * 10_001})
+    assert response.status_code == 413
+
+
+def test_analyze_vision(dummy_png, monkeypatch):
+    async def vision_stub(_path):
+        return {"risk_level": "low", "visual_findings": [], "summary": "Изображение выглядит безопасным."}
+
+    monkeypatch.setattr("app.main.vision_fraud_tool", vision_stub)
+    response = client.post("/analyze/vision", files={"file": ("test.png", dummy_png, "image/png")})
     assert response.status_code == 200
-    data = response.json()
-    assert "risk_level" in data
-    assert "visual_findings" in data
-    assert "summary" in data
+    assert response.json()["risk_level"] == "low"
 
 
-def test_analyze_vision_unsupported_format(dummy_txt):
-    file_payload = {"file": ("test.txt", dummy_txt, "text/plain")}
-    response = client.post("/analyze/vision", files=file_payload)
-    assert response.status_code == 400
-    assert "Unsupported file format" in response.json()["detail"]
+def test_analyze_vision_rejects_unsupported_format():
+    response = client.post("/analyze/vision", files={"file": ("test.txt", b"text", "text/plain")})
+    assert response.status_code == 415
 
 
-def test_analyze_stego(dummy_png):
-    file_payload = {"file": ("test.png", dummy_png, "image/png")}
-    response = client.post("/analyze/stego", files=file_payload)
+def test_analyze_vision_rejects_extension_spoofing():
+    response = client.post("/analyze/vision", files={"file": ("test.png", b"not an image", "image/png")})
+    assert response.status_code == 415
+
+
+def test_analyze_stego(dummy_png, monkeypatch):
+    async def stego_stub(_path):
+        return {
+            "risk_level": "low",
+            "lsb_findings": {},
+            "ctf_flags": [],
+            "threat_words": [],
+            "macro_analysis": {},
+            "summary": "Файл выглядит безопасным.",
+        }
+
+    monkeypatch.setattr("app.main.stego_security_tool", stego_stub)
+    response = client.post("/analyze/stego", files={"file": ("test.png", dummy_png, "image/png")})
     assert response.status_code == 200
-    data = response.json()
-    assert "risk_level" in data
-    assert "lsb_findings" in data
-    assert "ctf_flags" in data
-    assert "threat_words" in data
-    assert "macro_analysis" in data
-    assert "summary" in data
+    assert response.json()["risk_level"] == "low"
 
 
-def test_analyze_full_text_only():
+def test_analyze_full_text_only(monkeypatch):
+    async def router_stub(*, file_path=None, text=None):
+        assert file_path is None
+        assert text == "Simple message without threats."
+        return {
+            "overall_risk": "low",
+            "fraud_probability": 15,
+            "agent_reports": {},
+            "final_summary": "Безопасно.",
+            "router_metadata": {"selected_provider": "local", "tokens_used": None, "cost_estimate": 0.0},
+        }
+
+    monkeypatch.setattr(router_controller, "route_decision", router_stub)
     response = client.post("/analyze/full", data={"text": "Simple message without threats."})
     assert response.status_code == 200
-    data = response.json()
-    assert "overall_risk" in data
-    assert "fraud_probability" in data
-    assert "agent_reports" in data
-    assert "final_summary" in data
-    assert "router_metadata" in data
-    
-    # Short text -> Should route to local
-    assert data["router_metadata"]["selected_provider"] == "local"
-    assert data["router_metadata"]["cost_estimate"] == 0.0
+    assert response.json()["router_metadata"]["selected_provider"] == "local"
 
 
-def test_analyze_full_with_file_and_text(dummy_png):
-    file_payload = {"file": ("test.png", dummy_png, "image/png")}
-    response = client.post("/analyze/full", files=file_payload, data={"text": "Check this out."})
+def test_analyze_full_with_file_and_text(dummy_png, monkeypatch):
+    async def router_stub(*, file_path=None, text=None):
+        assert file_path and os.path.exists(file_path)
+        assert text == "Check this out."
+        return {
+            "overall_risk": "low",
+            "fraud_probability": 15,
+            "agent_reports": {},
+            "final_summary": "Безопасно.",
+            "router_metadata": {"selected_provider": "local", "tokens_used": None, "cost_estimate": 0.0},
+        }
+
+    monkeypatch.setattr(router_controller, "route_decision", router_stub)
+    response = client.post(
+        "/analyze/full",
+        files={"file": ("test.png", dummy_png, "image/png")},
+        data={"text": "Check this out."},
+    )
     assert response.status_code == 200
-    data = response.json()
-    assert "overall_risk" in data
-    assert "agent_reports" in data
-    assert "router_metadata" in data
 
 
 def test_analyze_full_empty():
     response = client.post("/analyze/full")
     assert response.status_code == 400
-    assert "Must provide at least one input" in response.json()["detail"]

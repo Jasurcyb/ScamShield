@@ -18,6 +18,10 @@ venv/
 # Logs & temp
 *.log
 test_outputs/
+.pytest_tmp/
+.test_artifacts/
+.pip-audit-cache/
+.mimosa/
 
 # OS files
 .DS_Store

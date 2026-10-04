@@ -8,6 +8,7 @@ for visual signs of fraud using a vision LLM (Anthropic Claude, Gemini, or Firew
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 import mimetypes
 import os
@@ -27,7 +28,7 @@ _PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 
-from tools.llm_provider import call_fireworks_vision, parse_llm_json, is_valid_key
+from tools.llm_provider import call_fireworks_vision, parse_llm_json, is_valid_key, summary_language_instruction
 
 # ── Vision analysis prompt ─────────────────────────────────────────────────────
 
@@ -115,9 +116,9 @@ def _error_result(error_type: str, detail: str) -> dict:
 
 # ── Standalone Async Function (LangChain @tool removed) ─────────────────────────
 
-async def vision_fraud_tool(file_path: str) -> dict:
+async def vision_fraud_tool(file_path: str, provider: str | None = None, language: str = "en") -> dict:
     """
-    Vision-based fraud detector for images.
+    Vision-based fraud detector. The verdict summary is written in `language`.
     """
     # ── Validate file ─────────────────────────────────────────────────────────
     if not os.path.isfile(file_path):
@@ -128,6 +129,23 @@ async def vision_fraud_tool(file_path: str) -> dict:
     gemini_key = os.environ.get("GEMINI_API_KEY")
     fireworks_key = os.environ.get("FIREWORKS_API_KEY")
 
+    if provider is None:
+        if is_valid_key(anthropic_key):
+            provider = "anthropic"
+        elif is_valid_key(gemini_key):
+            provider = "gemini"
+        elif is_valid_key(fireworks_key):
+            provider = "fireworks"
+        else:
+            return _error_result(
+                "Configuration Error",
+                "No vision provider configured. Set ANTHROPIC_API_KEY, GEMINI_API_KEY or FIREWORKS_API_KEY.",
+            )
+
+    # ── Build the language-aware prompt ───────────────────────────────────────
+    language_note = summary_language_instruction(language)
+    prompt = f"{_VISION_SYSTEM_PROMPT}\n\n{language_note}" if language_note else _VISION_SYSTEM_PROMPT
+
     # ── Encode image ──────────────────────────────────────────────────────────
     try:
         image_data, media_type = _encode_image(file_path)
@@ -135,14 +153,17 @@ async def vision_fraud_tool(file_path: str) -> dict:
         return _error_result("Encoding Error", str(exc))
 
     # ── Route to providers ────────────────────────────────────────────────────
-    if is_valid_key(anthropic_key):
+    if provider == "anthropic":
+        if not is_valid_key(anthropic_key):
+            return _error_result("Configuration Error", "Anthropic provider was selected without a valid API key.")
         # ── Call Anthropic Vision API ─────────────────────────────────────────────
         try:
             import anthropic
 
             client = anthropic.Anthropic(api_key=anthropic_key)
 
-            message = client.messages.create(
+            message = await asyncio.to_thread(
+                client.messages.create,
                 model="claude-sonnet-4-6-20250514",
                 max_tokens=1024,
                 messages=[
@@ -159,7 +180,7 @@ async def vision_fraud_tool(file_path: str) -> dict:
                             },
                             {
                                 "type": "text",
-                                "text": _VISION_SYSTEM_PROMPT,
+                                "text": prompt,
                             },
                         ],
                     }
@@ -187,7 +208,9 @@ async def vision_fraud_tool(file_path: str) -> dict:
         except Exception as exc:
             return _error_result("Unexpected Error", str(exc))
 
-    elif is_valid_key(gemini_key):
+    elif provider == "gemini":
+        if not is_valid_key(gemini_key):
+            return _error_result("Configuration Error", "Gemini provider was selected without a valid API key.")
         # ── Call Gemini Vision API via requests ───────────────────────────────────
         try:
             import requests
@@ -199,7 +222,7 @@ async def vision_fraud_tool(file_path: str) -> dict:
                     {
                         "parts": [
                             {
-                                "text": _VISION_SYSTEM_PROMPT
+                                "text": prompt
                             },
                             {
                                 "inlineData": {
@@ -220,7 +243,7 @@ async def vision_fraud_tool(file_path: str) -> dict:
                 "x-goog-api-key": gemini_key
             }
             
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            response = await asyncio.to_thread(requests.post, url, json=payload, headers=headers, timeout=60)
             
             if response.status_code != 200:
                 return _error_result(
@@ -244,60 +267,15 @@ async def vision_fraud_tool(file_path: str) -> dict:
         except Exception as exc:
             return _error_result("Unexpected Error", str(exc))
 
-    elif is_valid_key(fireworks_key):
+    elif provider == "fireworks":
+        if not is_valid_key(fireworks_key):
+            return _error_result("Configuration Error", "Fireworks provider was selected without a valid API key.")
         # ── Call Fireworks AI Vision API ──────────────────────────────────────────
         try:
-            raw_text = call_fireworks_vision(image_data, media_type, _VISION_SYSTEM_PROMPT)
+            raw_text = await asyncio.to_thread(call_fireworks_vision, image_data, media_type, prompt)
             return _parse_llm_response(raw_text)
         except Exception as exc:
             return _error_result("Fireworks Vision Error", str(exc))
 
     else:
-        # ── Call Ollama Vision API ────────────────────────────────────────────────
-        try:
-            import requests
-
-            base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-            if base_url.endswith("/v1"):
-                base_url = base_url[:-3]
-            elif base_url.endswith("/v1/"):
-                base_url = base_url[:-4]
-
-            url = f"{base_url}/api/chat"
-            model = os.environ.get("OLLAMA_MODEL", "minimax-m3:cloud")
-
-            payload = {
-                "model": model,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": _VISION_SYSTEM_PROMPT,
-                        "images": [image_data]
-                    }
-                ],
-                "stream": False
-            }
-
-            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=None)
-
-            if response.status_code != 200:
-                return _error_result(
-                    "API Error",
-                    f"Ollama API returned status {response.status_code}: {response.text}"
-                )
-
-            res_json = response.json()
-            try:
-                raw_text = res_json["message"]["content"]
-                return _parse_llm_response(raw_text)
-            except (KeyError, TypeError) as e:
-                return _error_result(
-                    "API Error",
-                    f"Failed to parse Ollama API response structure. Response: {json.dumps(res_json)}"
-                )
-        except requests.exceptions.Timeout as exc:
-            return _error_result("Timeout Error", f"Ollama API request timed out: {exc}")
-        except requests.exceptions.RequestException as exc:
-            return _error_result("Connection Error", f"Could not connect to Ollama API: {exc}")
-        except Exception as exc:
-            return _error_result("Unexpected Error", str(exc))
+        return _error_result("Configuration Error", f"Unknown vision provider: {provider}")

@@ -27,7 +27,7 @@ class TextResponse(BaseModel):
 # ── Response models for the hybrid router ─────────────────────────────────────
 
 class RouterMetadata(BaseModel):
-    selected_provider: str = Field(..., description="The model provider chosen: 'local', 'fireworks', 'anthropic', 'gemini'")
+    selected_provider: str = Field(..., description="The model provider chosen: 'fireworks', 'anthropic', 'gemini', or 'none' when nothing was analyzed")
     tokens_used: Optional[int] = Field(None, description="Number of tokens used in LLM processing if available")
     cost_estimate: float = Field(..., description="Estimated cost of the query in USD")
 

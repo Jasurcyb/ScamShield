@@ -9,16 +9,15 @@ allowing analyzer.py to run fully standalone without any Telegram or DB setup.
 # Curated threat-word list used by the forensic scanner.
 # Covers CTF flags, credential markers, crypto key headers, and malware keywords.
 DEFAULT_THREAT_WORDS = [
-    "flag{",        # Generic CTF flag prefix
-    "CTF{",         # Alternate CTF bracket notation
-    "password",     # Plaintext credential keyword
-    "secret_key",   # Secret/API key marker
-    "admin_token",  # Administrative token indicator
-    "private_key",  # RSA / PEM private key label
-    "BEGIN RSA",    # PEM private key header
-    "malware",      # Malware artifact keyword
-    "backdoor",     # Backdoor / RAT indicator
-    "exploit",      # Exploit payload marker
+    "begin rsa private key",
+    "begin openssh private key",
+    "powershell -enc",
+    "rundll32",
+    "mimikatz",
+    "meterpreter",
+    "malware",
+    "backdoor",
+    "exploit payload",
     # Supplemental Russian-language threat keywords (mirroring original bot defaults)
     "взрыв",        # explosion
     "теракт",       # terrorist act

@@ -1,27 +1,18 @@
 #!/bin/bash
-# entrypoint.sh — Pulls the required local model on startup in the background, and runs uvicorn.
+# entrypoint.sh — Runs the FastAPI app or the Telegram bot.
+# All inference runs on cloud LLM providers (Anthropic / Gemini / Fireworks);
+# there is no local Ollama dependency.
 
-python -c '
-import urllib.request, time, json, os
-model = os.environ.get("OLLAMA_MODEL", "gemma:2b")
-print("Waiting for Ollama container at http://ollama:11434 ...")
-for _ in range(60):
-    try:
-        urllib.request.urlopen("http://ollama:11434")
-        print("Connected to Ollama!")
-        print(f"Initiating background pull for model: {model}...")
-        
-        req = urllib.request.Request(
-            "http://ollama:11434/api/pull",
-            data=json.dumps({"name": model}).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        urllib.request.urlopen(req)
-        print(f"Model {model} pulled successfully!")
-        break
-    except Exception as e:
-        time.sleep(2)
-' &
+if [ "$1" = "bot" ]; then
+    exec python -m bot.main
+fi
 
 echo "Starting ScamShield FastAPI application..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Multi-worker mode multiplies the in-memory rate limit and analysis semaphore
+# per worker process; tune via env. --limit-concurrency sheds excess connections
+# with 503 instead of exhausting memory under a connection flood.
+# PORT is set by PaaS platforms (Render, Heroku, Railway); defaults to 8000 locally.
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" \
+    --workers "${UVICORN_WORKERS:-2}" \
+    --limit-concurrency "${UVICORN_MAX_CONNECTIONS:-120}" \
+    --timeout-keep-alive "${UVICORN_KEEP_ALIVE_SECONDS:-5}"

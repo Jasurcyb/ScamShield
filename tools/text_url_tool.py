@@ -19,7 +19,7 @@ _PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 
-from tools.llm_provider import call_text_llm, parse_llm_json, error_result
+from tools.llm_provider import call_text_llm, parse_llm_json, error_result, summary_language_instruction
 
 # Top banks in Uzbekistan for typo-squatting checks
 TOP_UZ_BANKS = [
@@ -70,27 +70,24 @@ Rules for risk_level:
 """
 
 def _extract_urls(text: str) -> list[str]:
-    """Extract URLs from text using a regex."""
+    """Extract explicit URLs and bare domains commonly sent in chat messages."""
     url_pattern = re.compile(
-        r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+        r'(?<![\w@])(?:(?:https?://)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?::\d{1,5})?(?:/[^\s<>]*)?)',
+        re.IGNORECASE,
     )
-    return url_pattern.findall(text)
+    return [match.rstrip(".,!?;:)") for match in url_pattern.findall(text)]
 
 def _check_url_heuristics(url: str) -> list[str]:
     """Perform basic pattern checks on a URL."""
     findings = []
     try:
-        parsed = urlparse(url)
-        domain = parsed.netloc.lower()
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        domain = (parsed.hostname or "").lower()
         if not domain:
             return findings
 
-        # Strip port if present
-        if ':' in domain:
-            domain = domain.split(':')[0]
-
         # Check Punycode (IDN homograph attacks)
-        if domain.startswith('xn--'):
+        if any(label.startswith('xn--') for label in domain.split('.')):
             findings.append(f"Punycode domain detected ({domain}), often used for homograph attacks.")
 
         # Check Levenshtein distance to top banks
@@ -112,9 +109,9 @@ def _check_url_heuristics(url: str) -> list[str]:
 
 # ── Standalone Async Function (LangChain @tool removed) ─────────────────────────
 
-async def text_url_fraud_tool(text: str) -> dict:
+async def text_url_fraud_tool(text: str, provider: str | None = None, language: str = "en") -> dict:
     """
-    Text and URL fraud detector.
+    Text and URL fraud detector. The verdict summary is written in `language`.
     """
     if not text or not text.strip():
          return {
@@ -128,11 +125,16 @@ async def text_url_fraud_tool(text: str) -> dict:
     for url in urls:
         heuristic_findings.extend(_check_url_heuristics(url))
 
-    prompt = f"{_TEXT_SYSTEM_PROMPT}\n\nText to analyze:\n{text}"
+    prompt_sections = [
+        _TEXT_SYSTEM_PROMPT,
+        summary_language_instruction(language),
+        f"Text to analyze:\n{text}",
+    ]
+    prompt = "\n\n".join(section for section in prompt_sections if section)
 
     try:
         # Run LLM call in a thread pool to avoid blocking async event loop
-        raw_response = await asyncio.to_thread(call_text_llm, prompt)
+        raw_response = await asyncio.to_thread(call_text_llm, prompt, provider)
         result = parse_llm_json(raw_response, fallback_findings_key="text_findings")
         
         # Merge heuristic findings if they aren't already covered

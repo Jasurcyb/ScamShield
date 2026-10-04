@@ -7,7 +7,7 @@ from mutagen import File
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3
 from oletools.olevba import VBA_Parser
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 import numpy as np
 from scipy import signal
 from pydub import AudioSegment
@@ -190,10 +190,8 @@ def calculate_entropy(file_path: str) -> dict:
         if not data:
             return {"status": "ok", "entropy": 0.0, "details": "Пустой файл"}
 
-        byte_counts = [0] * 256
-        for byte in data:
-            byte_counts[byte] += 1
-            
+        byte_counts = np.bincount(np.frombuffer(data, dtype=np.uint8), minlength=256)
+
         entropy = 0.0
         for count in byte_counts:
             if count == 0:
@@ -423,7 +421,7 @@ def scan_artifacts(file_path: str) -> dict:
     """
     # Триггер-слова приходят из БД как bytes (из-за предыдущих фиксов), поэтому декодируем их в строки
     THREAT_WORDS_BYTES = database.get_trigger_words()
-    threat_words_str = [w.decode('utf-8', errors='ignore') for w in THREAT_WORDS_BYTES]
+    threat_words_str = [w.decode('utf-8', errors='ignore').lower() for w in THREAT_WORDS_BYTES]
     
     # Теперь ищем текстовые паттерны
     flag_pattern = re.compile(r'(?i)(?:flag|ctf|picoctf|htb|thm)(?:\{[^}]+\}|[:\-\s]+[a-zA-Z0-9_\@\!\?\$\-]+)')
@@ -444,21 +442,21 @@ def scan_artifacts(file_path: str) -> dict:
         all_data_lower = all_data.lower()
         threats_found = [w for w in threat_words_str if w in all_data_lower]
         
-        all_flags = list(set(ctf_flags))
-        all_threats = list(set(threats_found))
+        all_flags = sorted(set(ctf_flags))
+        all_threats = sorted(set(threats_found))
 
         danger_level = 0
         details_msgs = []
         status = "ok"
 
         if all_flags:
-            danger_level += 15
-            status = "danger"
+            danger_level += 3
+            status = "warning"
             details_msgs.append("CTF-флаги")
             
         if all_threats:
-            danger_level += 20
-            status = "danger"
+            danger_level += 10
+            status = "warning"
             details_msgs.append("Критические ключевые слова")
 
         if lsb_text and (all_flags or all_threats):

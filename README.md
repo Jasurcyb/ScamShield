@@ -1,6 +1,6 @@
 # ScamShield — Multimodal Fraud Detection REST API
 
-**ScamShield** is a production-ready fraud detection system built for the **AMD Developer Hackathon: ACT II**.  
+**ScamShield** is a Telegram-first MVP for the **President Tech Award Incubation Track**. It helps users identify phishing, suspicious links, forged receipts, and risky files.
 It exposes an async FastAPI REST API that inspects text, URLs, documents, and images for phishing, social engineering, and forensic modifications — with a smart hybrid AI router that balances cost, speed, and accuracy.
 
 ---
@@ -12,9 +12,8 @@ It exposes an async FastAPI REST API that inspects text, URLs, documents, and im
 | Text analysis (primary) | DeepSeek V4 Flash (Fireworks AI, AMD Instinct GPUs) | ✅ Active |
 | Vision analysis (primary) | Minimax M3 (Fireworks AI, AMD Instinct GPUs) | ✅ Active |
 | Text/Vision (Gemma path) | Google Gemma 4 31B IT (Fireworks AI) | 🔧 Code-ready, pending model access on current API tier |
-| Offline fallback | Google Gemma 4 12B (local Ollama in Docker) | ✅ Active, $0 cost |
 
-The router attempts **Google Gemma 4 31B IT** first; if unavailable (HTTP 404), it automatically falls back to **DeepSeek V4 Flash** (text) / **Minimax M3** (vision) on Fireworks AI, then to **local Ollama** if no API key or internet connection is present.
+The router attempts **Google Gemma 4 31B IT** first; if unavailable (HTTP 404), it automatically falls back to **DeepSeek V4 Flash** (text) / **Minimax M3** (vision) on Fireworks AI. All inference is cloud-based — a configured cloud API key (Anthropic / Gemini / Fireworks) is required.
 
 > **Note on Gemma Prize eligibility:** The codebase is fully written to use Google Gemma 4 31B IT as the primary model. The fallback to DeepSeek/Minimax is triggered only because the current Fireworks API tier does not expose Gemma models. If the tier is upgraded or Gemma access is granted, the system will automatically route all requests through Gemma with zero code changes.
 
@@ -22,7 +21,7 @@ The router attempts **Google Gemma 4 31B IT** first; if unavailable (HTTP 404), 
 
 ## 🚀 Key Features
 
-1. **Hybrid Provider Routing Controller** — Inspects incoming requests and intelligently routes lightweight tasks to a free local Ollama model, and complex visual/threat queries to cloud AI (Fireworks AI on AMD Instinct GPUs). Minimizes API costs while maintaining high accuracy.
+1. **Hybrid Provider Routing Controller** — Picks the best available cloud AI provider (Anthropic → Gemini → Fireworks on AMD Instinct GPUs) per request and synthesizes a unified verdict from all agents. Fails fast with a clear configuration error when no API key is set.
 
 2. **9-Probe Forensic Scanner** — Built-in parallel deep-scanning engine:
    - LSB steganography detection
@@ -52,17 +51,17 @@ The router attempts **Google Gemma 4 31B IT** first; if unavailable (HTTP 404), 
                   └──────────────────┬─────────────────────┘
                                      │
              ┌───────────────────────┴───────────────────────┐
-             ▼ (Size & Keyword Heuristics)                   ▼ (Local Scan)
+             ▼ (Cloud LLM)                                   ▼ (Local Scan)
 ┌───────────────────────────┐                         ┌─────────────┐
 │   Hybrid LLM Controller   │                         │  Forensics  │
-└──────┬─────────────┬──────┘                         │   Engine    │
-       │             │                                └──────┬──────┘
-       ▼ (Cloud)     ▼ (Local)                               ▼
-┌──────────────┐ ┌──────────────┐                    • LSB Stego Check
-│ Fireworks AI │ │ Local Ollama │                    • Histogram Comb
-│ (DeepSeek /  │ │ (Gemma 4 12B)│                    • PDF JS Check
-│  Minimax M3) │ │    FREE      │                    • VBA AutoExec
-└──────────────┘ └──────────────┘                    • EXIF & Entropy
+└──────────────┬────────────┘                         │   Engine    │
+               │                                └──────┬──────┘
+               ▼                                      ▼
+┌───────────────────────────┐                    • LSB Stego Check
+│ Fireworks AI              │                    • Histogram Comb
+│ DeepSeek V4 / Minimax M3  │                    • PDF JS Check
+│ / Gemma 4 31B IT          │                    • VBA AutoExec
+└───────────────────────────┘                    • EXIF & Entropy
 ```
 
 ---
@@ -73,7 +72,7 @@ The router attempts **Google Gemma 4 31B IT** first; if unavailable (HTTP 404), 
 ```bash
 cp .env.example .env
 ```
-Fill in your `FIREWORKS_API_KEY`. If no key is set, the router falls back to local Ollama execution automatically.
+Fill in `TELEGRAM_BOT_TOKEN` and at least one cloud AI key (`FIREWORKS_API_KEY`, `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`). Without a cloud key the API and bot fail fast with a clear configuration error.
 
 ### 2. Pull Pre-built Image
 ```bash
@@ -82,7 +81,7 @@ docker run -p 8000:8000 --env-file .env ghcr.io/jasurcyb/scamshield-amd-act2:lat
 ```
 
 ### 3. Run with Docker Compose (Recommended)
-This launches the FastAPI app and a local Ollama container. On startup, the entrypoint script automatically pulls `gemma4:12b` in the background.
+This launches the FastAPI app; all inference runs on cloud LLM providers.
 
 ```bash
 docker compose up --build
@@ -91,7 +90,49 @@ docker compose up --build
 The API is available at `http://localhost:8000`.  
 Interactive Swagger UI: `http://localhost:8000/docs`
 
-### 4. Running Tests
+### 4. Run the Telegram bot
+
+Set `TELEGRAM_BOT_TOKEN` and a public `SUPPORT_CONTACT` (Telegram handle or email) in `.env`, then run:
+
+```bash
+docker compose up --build bot
+```
+
+**Commands and flow**
+
+- `/start` — first launch shows a terms-of-use summary with an **Accept** button; analysis is blocked until the terms are accepted (hard gate). After acceptance the bot shows the mode menu and command reference.
+- `/mode` — choose the analysis mode: **Full analysis (coordinator)** runs all agents and synthesizes a unified verdict, **Stego/forensics only**, **Text & links only**, and **Image only** run a single agent. The mode applies per chat until changed.
+- `/language` — switch the interface language (Русский / O‘zbekcha / English). The verdict follows the choice: LLM summaries are generated in the selected language and the local stego summary uses localized templates. API defaults stay English.
+- `/terms` — full user agreement; `/privacy` — pilot privacy notice.
+- Every result ends with a disclaimer and a localized safety recommendation.
+
+Per-chat state (language, mode, terms acceptance) is kept in memory and resets when the bot process restarts — acceptable for the pilot, use a persistent store before scaling.
+
+### Capacity & load protection (≈40 concurrent users)
+
+The async layer handles hundreds of connections; the constrained resources are the thread pool, the LLM backend and RAM. Built-in guards:
+
+| Guard | Default | What it does |
+|---|---|---|
+| `MAX_CONCURRENT_ANALYSES` | 20 | Semaphore shared by API and bot; excess analyses fail fast with 503 (API) / a "server busy" message (bot) instead of piling up |
+| `MAX_REQUESTS_PER_MINUTE` | 30 | Per-IP sliding window on the API (in-memory, per worker process) |
+| `BOT_MAX_ANALYSES_PER_MINUTE` | 10 | Per-chat sliding window in the bot |
+| `UVICORN_WORKERS` / `UVICORN_MAX_CONNECTIONS` | 2 / 120 | Worker processes and a hard cap on simultaneous connections — excess connections get an immediate 503 |
+| `THREAD_POOL_SIZE` | 32 | Threads for the sync pipeline (LLM calls, PIL, forensics); keep ≈2× `MAX_CONCURRENT_ANALYSES` |
+
+Sizing rules of thumb: with a cloud LLM (Fireworks) a full burst of 40 users completes in roughly 2 waves of single-analysis time. A 20 MP image scan costs ~5 s of CPU and ~300 MB RAM.
+
+For deployment-grade DDoS protection put a reverse proxy (nginx/Caddy) or Cloudflare in front of the API — the app-level guards above protect the analysis pipeline, while the proxy absorbs connection floods, TLS overhead and bot traffic. The Telegram bot does not need one (polling, no public port).
+
+The full pilot privacy notice is available through `/privacy`; it explains that the result is advisory, files are deleted after processing, and selected cloud AI providers may process text or images. Do not launch publicly until `SUPPORT_CONTACT` is set and the notices have been reviewed for the intended deployment.
+
+For local development:
+
+```bash
+python -m bot.main
+```
+
+### 5. Running Tests
 ```bash
 docker compose run app pytest
 ```
@@ -135,17 +176,22 @@ scamshield_fastapi/
 │   ├── main.py          # FastAPI application & endpoint handlers
 │   ├── models.py         # Pydantic request/response schemas
 │   └── router.py         # Hybrid LLM provider routing logic
+├── bot/
+│   ├── main.py           # Telegram polling entry point
+│   ├── handlers.py       # Commands and message handlers
+│   └── localization.py   # Russian, Uzbek and English UI text
 ├── tools/
-│   ├── llm_provider.py   # Fireworks AI / Ollama / Gemini backends
+│   ├── llm_provider.py   # Fireworks AI / Gemini / Anthropic backends
 │   ├── vision_tool.py    # Image analysis via multimodal LLMs
 │   ├── text_url_tool.py  # Text & URL phishing analysis
 │   └── stego_tool.py     # Steganography & forensic scanning
 ├── analyzer.py           # Core forensic engine (9 parallel probes)
-├── database.py           # SQLite scan history storage
+├── database.py           # Curated scanner keyword configuration
 ├── Dockerfile            # Multi-stage container build
-├── docker-compose.yml    # App + Ollama orchestration
-├── entrypoint.sh         # Container startup (Ollama wait + model pull)
+├── docker-compose.yml    # App + bot orchestration
+├── entrypoint.sh         # Container startup (app or bot, PORT aware)
 ├── requirements.txt      # Python dependencies
+├── requirements.lock     # Reproducible dependency versions
 └── .env.example          # Environment variable template
 ```
 
@@ -154,11 +200,10 @@ scamshield_fastapi/
 ## 🔧 Tech Stack
 
 - **Runtime:** Python 3.11, FastAPI, Uvicorn
-- **Cloud AI:** Fireworks AI (DeepSeek V4 Flash, Minimax M3, Gemma 4 31B IT ready)
-- **Local AI:** Ollama with Google Gemma 4 12B
+- **Cloud AI:** Fireworks AI (DeepSeek V4 Flash, Minimax M3, Gemma 4 31B IT ready), plus Anthropic and Gemini as configured alternatives
 - **Infrastructure:** Docker Compose, AMD Instinct GPUs (via Fireworks AI)
 - **Forensics:** Pillow, python-docx, PyPDF2, numpy
-- **Database:** SQLite (scan history)
+- **Data handling:** Uploaded files are deleted after analysis; persistent history is not enabled in the MVP.
 
 ---
 
