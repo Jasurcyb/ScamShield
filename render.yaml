@@ -1,0 +1,72 @@
+# Render Blueprint for ScamShield.
+# Dashboard → New → Blueprint → point at this repository.
+#
+# Two services are created from the same image:
+#   - api: FastAPI web service (public HTTP API + Swagger UI)
+#   - bot: background worker running the Telegram polling bot
+#
+# Secrets are NOT stored here: set FIREWORKS_API_KEY, TELEGRAM_BOT_TOKEN and
+# SUPPORT_CONTACT in the Render dashboard (Environment tab) for both services.
+
+services:
+  - type: web
+    name: scamshield-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: UVICORN_WORKERS
+        value: "2"
+      - key: UVICORN_MAX_CONNECTIONS
+        value: "120"
+      - key: MAX_CONCURRENT_ANALYSES
+        value: "20"
+      - key: THREAD_POOL_SIZE
+        value: "32"
+      - key: MAX_REQUESTS_PER_MINUTE
+        value: "30"
+      - key: MAX_UPLOAD_BYTES
+        value: "10485760"
+      - key: MAX_IMAGE_PIXELS
+        value: "20000000"
+      - key: MAX_TEXT_CHARS
+        value: "10000"
+      - key: CORS_ALLOW_ORIGINS
+        value: ""
+      - key: FIREWORKS_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  - type: worker
+    name: scamshield-bot
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: ["python", "-m", "bot.main"]
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: THREAD_POOL_SIZE
+        value: "32"
+      - key: MAX_CONCURRENT_ANALYSES
+        value: "20"
+      - key: BOT_MAX_ANALYSES_PER_MINUTE
+        value: "10"
+      - key: SUPPORT_CONTACT
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: FIREWORKS_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false

@@ -226,22 +226,46 @@ def check_trailing_data(file_path: str) -> dict:
         jpeg_eof = b'\xff\xd9'
         png_eof = b'\x49\x45\x4E\x44\xAE\x42\x60\x82'
 
-        if jpeg_eof in data:
+        # Формат определяется по сигнатуре в начале файла, а не по наличию
+        # маркера где-то внутри: пара байт FF D9 случайно встречается в сжатых
+        # данных PNG и давала ложный «хвост» в десятки килобайт.
+        if data.startswith(b'\xff\xd8\xff'):
             pos = data.rfind(jpeg_eof)
-            if file_len > pos + 2:
+            if pos == -1:
+                details = "Маркер конца JPEG не найден."
+            elif file_len > pos + 2:
                 has_trailing = True
                 trailing_size = file_len - (pos + 2)
                 details = f"Найдены данные после EOF ({trailing_size} байт)."
-        elif png_eof in data:
+        elif data.startswith(b'\x89PNG\r\n\x1a\n'):
             pos = data.rfind(png_eof)
-            if file_len > pos + 8:
+            if pos == -1:
+                details = "Маркер IEND не найден."
+            elif file_len > pos + 8:
                 has_trailing = True
                 trailing_size = file_len - (pos + 8)
                 details = f"Найдены данные после IEND ({trailing_size} байт)."
+        elif data.startswith((b'GIF87a', b'GIF89a')):
+            pos = data.rfind(b'\x3b')
+            if pos != -1 and file_len > pos + 1:
+                has_trailing = True
+                trailing_size = file_len - (pos + 1)
+                details = f"Найдены данные после трейлера GIF ({trailing_size} байт)."
+        elif data.startswith(b'%PDF-'):
+            pos = data.rfind(b'%%EOF')
+            if pos != -1:
+                # После %%EOF допустимы переводы строк и пробелы.
+                tail = data[pos + 5:]
+                stripped = tail.strip(b' \t\r\n\x00')
+                if stripped:
+                    has_trailing = True
+                    trailing_size = len(tail)
+                    details = f"Найдены данные после %%EOF ({trailing_size} байт)."
         elif data.startswith(b'OggS'):
             details = "OGG контейнер ок."
         else:
             details = "EOF не найден или формат не определен."
+
 
         # Исключение для технического шлейфа
         is_media = file_path.lower().endswith(('.ogg', '.mp3', '.wav', '.mp4', '.mov', '.jpg', '.jpeg', '.png'))

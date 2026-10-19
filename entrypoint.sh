@@ -1,10 +1,18 @@
 #!/bin/bash
-# entrypoint.sh — Runs the FastAPI app or the Telegram bot.
+# entrypoint.sh — Runs the FastAPI app, the Telegram bot, or an explicit command.
 # All inference runs on cloud LLM providers (Anthropic / Gemini / Fireworks);
 # there is no local Ollama dependency.
 
+set -e
+
 if [ "$1" = "bot" ]; then
     exec python -m bot.main
+fi
+
+# Any other command is executed as given (Render worker services pass their
+# own command here, e.g. `python -m bot.main`).
+if [ "$#" -gt 0 ]; then
+    exec "$@"
 fi
 
 echo "Starting ScamShield FastAPI application..."
