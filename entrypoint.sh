@@ -9,9 +9,9 @@ if [ "$1" = "bot" ]; then
     exec python -m bot.main
 fi
 
-# Any other command is executed as given (Render worker services pass their
-# own command here, e.g. `python -m bot.main`).
-if [ "$#" -gt 0 ]; then
+# Any other command is executed as given (Render/Heroku worker services pass
+# their own command here, e.g. `python -m bot.main`).
+if [ "$#" -gt 0 ] && [ "$1" != "web" ]; then
     exec "$@"
 fi
 
