@@ -14,8 +14,11 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /workspace
 
 # Copy requirements and install dependencies
+# Upgrade pip itself first: pip vendors its own CA bundle, and the base image
+# ships an old one that still trusts the compromised eMudhra chain (Oct 2026).
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip "certifi>=2026.10.19" \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .

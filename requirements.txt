@@ -26,6 +26,8 @@ python-dotenv>=1.0
 requests>=2.31.0
 PyYAML>=6.0
 fireworks-ai>=0.13.0
+# Trust store: 2026.10.19+ drops the compromised eMudhra/emSign intermediates
+certifi>=2026.10.19
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest>=8.0.0
