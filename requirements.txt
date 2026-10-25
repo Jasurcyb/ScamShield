@@ -28,6 +28,8 @@ PyYAML>=6.0
 fireworks-ai>=0.13.0
 # Trust store: 2026.10.19+ drops the compromised eMudhra/emSign intermediates
 certifi>=2026.10.19
+# Optional scan-verdict persistence (enabled via DATABASE_URL)
+psycopg[binary]>=3.2,<4
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest>=8.0.0

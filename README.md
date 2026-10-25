@@ -36,6 +36,12 @@ The router attempts **Google Gemma 4 31B IT** first; if unavailable (HTTP 404), 
 
 3. **Levenshtein Typosquatting Engine** — High-performance domain similarity checking targeted at Central Asian banking platforms (Kapitalbank, Click, Payme, Uzcard, Humo) to catch phishing redirects like `kap1talbank.uz` or `payme-verif.uz`.
 
+4. **Server-side Link Verification (SSRF-hardened)** — URLs are actually fetched: DNS is resolved and every IP must be public (loopback/private/link-local — including the 169.254.169.254 metadata address — reserved and multicast are rejected); redirects are followed manually with the same validation on every hop; shorteners like bit.ly are expanded so typosquat checks run on the **final** domain. Responses are streamed with a 64 KB cap. Known limitation: resolve-then-connect leaves a short TOCTOU window for DNS rebinding.
+
+5. **Eval-Driven Quality** — 87 labelled cases in `eval/dataset.jsonl` with an offline scorer (`python eval/run_eval.py`): deterministic-layer accuracy 97.2%, precision 100%, recall 94.6% (see `eval/BASELINE.md`). Prompt-injection resilience is covered by a dedicated test suite where a mocked LLM complies with attacker instructions and the pipeline must still elevate risk.
+
+6. **Feedback Loop (optional PostgreSQL)** — set `DATABASE_URL` and every verdict gets «🐟 scam / ✅ not a scam» buttons; only the verdict and feedback are stored (never message or file content). Without `DATABASE_URL` persistence is off and the bot works unchanged. `docker compose up` starts a local Postgres automatically.
+
 ---
 
 ## 📐 Architecture

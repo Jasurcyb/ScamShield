@@ -8,6 +8,8 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    depends_on:
+      - postgres
 
   bot:
     build: .
@@ -15,3 +17,23 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=scamshield
+      - POSTGRES_PASSWORD=scamshield_dev
+      - POSTGRES_DB=scamshield
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scamshield"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

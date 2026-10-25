@@ -19,6 +19,7 @@ from app.security import (
     get_analysis_semaphore,
     validate_uploaded_file,
 )
+from app import db
 from bot.localization import DEFAULT_LANGUAGE, text
 from tools.stego_tool import stego_security_tool
 from tools.vision_tool import vision_fraud_tool
@@ -60,6 +61,21 @@ def format_result(result: dict[str, Any], language: str) -> str:
     return f"{report}\n\n<i>{html.escape(text(language, 'disclaimer'))}</i>"
 
 
+def _persist_scan(chat_id: int, mode: str, input_type: str, result: dict[str, Any]) -> None:
+    """Best-effort verdict storage; sets scan_id for the feedback buttons."""
+    if not db.db_enabled():
+        return
+    scan_id = db.save_scan(
+        chat_id,
+        mode=mode,
+        input_type=input_type,
+        overall_risk=_risk_key(result),
+        fraud_probability=int(result.get("fraud_probability", 0) or 0),
+        summary=str(result.get("final_summary") or result.get("summary") or "")[:1000],
+    )
+    result["scan_id"] = scan_id
+
+
 def _wrap_single_tool_result(agent_name: str, report: dict[str, Any]) -> dict[str, Any]:
     """Present a single-tool (mode-restricted) result in the router's response shape."""
     return {
@@ -78,6 +94,7 @@ def _wrap_single_tool_result(agent_name: str, report: dict[str, Any]) -> dict[st
 async def analyze_text_content(
     content: str,
     *,
+    chat_id: int = 0,
     language: str = DEFAULT_LANGUAGE,
     mode: str = "full",
 ) -> dict[str, Any]:
@@ -86,7 +103,9 @@ async def analyze_text_content(
     if len(content) > MAX_TEXT_CHARS:
         raise ValueError("text_too_long")
     async with _analysis_slot():
-        return await router_controller.route_decision(text=content, language=language)
+        result = await router_controller.route_decision(text=content, language=language)
+    _persist_scan(chat_id, mode, "text", result)
+    return result
 
 
 async def analyze_telegram_file(
@@ -95,6 +114,7 @@ async def analyze_telegram_file(
     file_id: str,
     filename: str,
     caption: str | None = None,
+    chat_id: int = 0,
     language: str = DEFAULT_LANGUAGE,
     mode: str = "full",
 ) -> dict[str, Any]:
@@ -119,11 +139,14 @@ async def analyze_telegram_file(
         async with _analysis_slot():
             if mode == "stego":
                 report = await stego_security_tool(path, language=language)
-                return _wrap_single_tool_result("stego", report)
-            if mode == "vision":
+                result = _wrap_single_tool_result("stego", report)
+            elif mode == "vision":
                 report = await vision_fraud_tool(path, language=language)
-                return _wrap_single_tool_result("vision", report)
-            return await router_controller.route_decision(file_path=path, text=caption, language=language)
+                result = _wrap_single_tool_result("vision", report)
+            else:
+                result = await router_controller.route_decision(file_path=path, text=caption, language=language)
+        _persist_scan(chat_id, mode, "file", result)
+        return result
     finally:
         if os.path.exists(path):
             os.unlink(path)

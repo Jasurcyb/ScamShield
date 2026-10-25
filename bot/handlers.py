@@ -10,6 +10,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from fastapi import HTTPException
 
+from app import db
 from app.security import MAX_UPLOAD_BYTES
 from bot.localization import LANGUAGES, MODES, text
 from bot.service import analyze_telegram_file, analyze_text_content, format_result
@@ -46,6 +47,20 @@ def _mode_keyboard(language: str) -> InlineKeyboardMarkup:
 def _accept_keyboard(language: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=text(language, "accept_terms"), callback_data="terms:accept")]]
+    )
+
+
+def _feedback_keyboard(scan_id: int, language: str) -> InlineKeyboardMarkup | None:
+    """Feedback buttons under a result; None when persistence is off."""
+    if not db.db_enabled():
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=text(language, "fb_scam"), callback_data=f"fb:{scan_id}:scam"),
+                InlineKeyboardButton(text=text(language, "fb_clean"), callback_data=f"fb:{scan_id}:clean"),
+            ]
+        ]
     )
 
 
@@ -133,6 +148,28 @@ async def accept_terms(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("fb:"))
+async def record_scan_feedback(callback: CallbackQuery) -> None:
+    """Store the user's scam/not-scam feedback for the reported scan."""
+    if callback.message is None or callback.data is None:
+        await callback.answer()
+        return
+    try:
+        _, scan_id_raw, verdict = callback.data.split(":", maxsplit=2)
+        scan_id = int(scan_id_raw)
+    except ValueError:
+        await callback.answer()
+        return
+
+    language = get_chat_state(callback.message.chat.id).language
+    if db.record_feedback(scan_id, verdict):
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer(text(language, "fb_saved"))
+        await callback.answer()
+    else:
+        await callback.answer(text(language, "fb_failed"), show_alert=False)
+
+
 @router.callback_query(F.data.startswith("language:"))
 async def choose_language(callback: CallbackQuery) -> None:
     language = callback.data.split(":", maxsplit=1)[1]
@@ -173,7 +210,8 @@ async def _send_analysis(message: Message, analysis) -> None:
     await message.answer(text(language, "processing"))
     try:
         result = await analysis
-        await message.answer(format_result(result, language))
+        keyboard = _feedback_keyboard(result.get("scan_id") or 0, language)
+        await message.answer(format_result(result, language), reply_markup=keyboard)
     except ValueError as error:
         if str(error) == "unsupported_format":
             await message.answer(text(language, "unsupported"))
@@ -207,7 +245,7 @@ async def analyze_text(message: Message) -> None:
         return
     await _send_analysis(
         message,
-        analyze_text_content(message.text, language=state.language, mode=state.mode),
+        analyze_text_content(message.text, chat_id=message.chat.id, language=state.language, mode=state.mode),
     )
 
 
@@ -224,6 +262,7 @@ async def analyze_photo(message: Message, bot: Bot) -> None:
             file_id=largest_photo.file_id,
             filename="telegram_photo.jpg",
             caption=message.caption,
+            chat_id=message.chat.id,
             language=state.language,
             mode=state.mode,
         ),
@@ -247,6 +286,7 @@ async def analyze_document(message: Message, bot: Bot) -> None:
             file_id=document.file_id,
             filename=document.file_name or "uploaded_file",
             caption=message.caption,
+            chat_id=message.chat.id,
             language=state.language,
             mode=state.mode,
         ),
@@ -270,6 +310,7 @@ async def analyze_audio(message: Message, bot: Bot) -> None:
             file_id=audio.file_id,
             filename=audio.file_name or "telegram_audio.mp3",
             caption=message.caption,
+            chat_id=message.chat.id,
             language=state.language,
             mode=state.mode,
         ),
@@ -294,6 +335,7 @@ async def analyze_voice(message: Message, bot: Bot) -> None:
             file_id=voice.file_id,
             filename="telegram_voice.ogg",
             caption=None,
+            chat_id=message.chat.id,
             language=state.language,
             mode=state.mode,
         ),
