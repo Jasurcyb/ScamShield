@@ -112,6 +112,8 @@ def _check_url_heuristics(url: str) -> list[str]:
 async def text_url_fraud_tool(text: str, provider: str | None = None, language: str = "en") -> dict:
     """
     Text and URL fraud detector. The verdict summary is written in `language`.
+    URLs are also fetched server-side (with SSRF guards) when URL_CHECK_ENABLED
+    is on, so shorteners and redirects are expanded before typosquat checks.
     """
     if not text or not text.strip():
          return {
@@ -125,6 +127,11 @@ async def text_url_fraud_tool(text: str, provider: str | None = None, language: 
     for url in urls:
         heuristic_findings.extend(_check_url_heuristics(url))
 
+    # Server-side link inspection (safe fetch, manual redirects). Runs in
+    # parallel with the LLM call; adds findings from the FINAL domain.
+    from tools.url_checker import check_urls_in_text
+    url_reports_task = asyncio.create_task(check_urls_in_text(text))
+
     prompt_sections = [
         _TEXT_SYSTEM_PROMPT,
         summary_language_instruction(language),
@@ -133,21 +140,41 @@ async def text_url_fraud_tool(text: str, provider: str | None = None, language: 
     prompt = "\n\n".join(section for section in prompt_sections if section)
 
     try:
-        # Run LLM call in a thread pool to avoid blocking async event loop
-        raw_response = await asyncio.to_thread(call_text_llm, prompt, provider)
+        llm_task = asyncio.to_thread(call_text_llm, prompt, provider)
+        raw_response, url_reports = await asyncio.gather(llm_task, url_reports_task)
+
+        for report in url_reports:
+            heuristic_findings.extend(report.get("findings", []))
+
         result = parse_llm_json(raw_response, fallback_findings_key="text_findings")
-        
+
         # Merge heuristic findings if they aren't already covered
         if heuristic_findings:
             current_findings = result.get("text_findings", [])
             current_findings.extend(heuristic_findings)
             result["text_findings"] = list(set(current_findings)) # Deduplicate
-            
+
             # Elevate risk if heuristics found something
             if result.get("risk_level") in ["low", "medium"]:
                 result["risk_level"] = "high"
-                
+
         return result
 
     except Exception as exc:
+        # The URL report may still be useful when the LLM path failed.
+        try:
+            url_reports = await url_reports_task
+        except Exception:
+            url_reports = []
+        if url_reports or heuristic_findings:
+            for report in url_reports:
+                heuristic_findings.extend(report.get("findings", []))
+            return {
+                "risk_level": "high" if heuristic_findings else "unknown",
+                "text_findings": list(set(heuristic_findings)),
+                "summary": (
+                    "The language model could not be reached, but automated link "
+                    "and domain checks produced findings. Treat flagged links with caution."
+                ),
+            }
         return error_result("LLM Error", str(exc), findings_key="text_findings")
