@@ -94,6 +94,11 @@ def _check_url_heuristics(url: str) -> list[str]:
         for bank_domain in TOP_UZ_BANKS:
             if domain == bank_domain:
                 continue # Exact match is fine
+
+            # A whitelisted bank domain can never typosquat another bank
+            # (nbu.uz is close to xb.uz by pure chance of short names).
+            if domain in TOP_UZ_BANKS:
+                break
             
             # Simple heuristic: if distance is small (1 or 2), it's suspicious
             # Only compare if lengths are similar to avoid false positives on short names
