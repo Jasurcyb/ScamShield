@@ -26,5 +26,12 @@ COPY . .
 # Copy and setup entrypoint script
 RUN chmod +x entrypoint.sh
 
+# Run as an unprivileged user: a parser bug in Pillow/oletools/pypdf/ffmpeg
+# must not land in a root shell inside the container.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin scamshield \
+    && mkdir -p /tmp /workspace \
+    && chown -R scamshield:scamshield /workspace
+USER scamshield
+
 # Run the app through uvicorn
 ENTRYPOINT ["./entrypoint.sh"]

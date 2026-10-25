@@ -1,7 +1,17 @@
-version: '3.8'
+# Container hardening rationale: the app parses untrusted files (Pillow,
+# oletools, pypdf, ffmpeg) and fetches untrusted URLs. A parser exploit must
+# stay trapped: no root, no capabilities, no privilege escalation, read-only
+# filesystem, writable only /tmp (tempfile target for uploads).
+x-hardening: &hardening
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=512m
 
-services:
-  app:
+services:  app:
     build: .
     restart: unless-stopped
     ports:
@@ -10,6 +20,13 @@ services:
       - .env
     depends_on:
       - postgres
+    <<: *hardening
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   bot:
     build: .
@@ -19,6 +36,7 @@ services:
       - .env
     depends_on:
       - postgres
+    <<: *hardening
 
   postgres:
     image: postgres:16-alpine
