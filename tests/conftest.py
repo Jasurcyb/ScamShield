@@ -12,3 +12,6 @@ import pytest
 @pytest.fixture(autouse=True)
 def _offline_url_checks(monkeypatch):
     monkeypatch.setenv("URL_CHECK_ENABLED", "false")
+    import tools.url_checker as uc
+
+    monkeypatch.setattr(uc, "REPUTATION_ENABLED", False)

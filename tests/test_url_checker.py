@@ -192,3 +192,59 @@ def test_text_tool_survives_llm_failure_with_url_findings(monkeypatch):
     result = asyncio.run(text_tool.text_url_fraud_tool("check https://bit.ly/x"))
     assert result["risk_level"] == "high"
     assert any("Shortened link" in f for f in result["text_findings"])
+
+
+# ── Domain-age reputation (RDAP) ──────────────────────────────────────────────
+
+class _FakeRdap:
+    def __init__(self, event_date):
+        self.status_code = 200
+        self._event_date = event_date
+
+    def json(self):
+        return {"events": [{"eventAction": "registration", "eventDate": self._event_date}]}
+
+
+def test_rdap_age_is_computed(monkeypatch):
+    monkeypatch.setattr(uc, "REPUTATION_ENABLED", True)
+    monkeypatch.setattr(uc.requests, "get", lambda *a, **k: _FakeRdap("2026-10-20T00:00:00Z"))
+    age = uc.domain_age_days("fresh-bank.example")
+    assert age is not None and age < 10
+
+
+def test_rdap_old_domain_is_not_suspicious(monkeypatch):
+    monkeypatch.setattr(uc, "REPUTATION_ENABLED", True)
+    monkeypatch.setattr(uc.requests, "get", lambda *a, **k: _FakeRdap("2010-01-01T00:00:00Z"))
+    age = uc.domain_age_days("old-bank.example")
+    assert age is not None and age > 30
+
+
+def test_rdap_failure_is_silent(monkeypatch):
+    monkeypatch.setattr(uc, "REPUTATION_ENABLED", True)
+
+    def boom(*a, **k):
+        raise uc.requests.exceptions.ConnectionError("rdap down")
+
+    monkeypatch.setattr(uc.requests, "get", boom)
+    assert uc.domain_age_days("unreachable.example") is None
+
+
+def test_fresh_domain_produces_finding(monkeypatch):
+    _allow_all_hosts(monkeypatch)
+    monkeypatch.setattr(uc, "_fetch_once", lambda url: FakeResponse(200))
+    monkeypatch.setattr(uc, "domain_age_days", lambda domain: 3)
+    report = check_url_sync("https://new-bank.example/login")
+    assert any("registered only 3 days ago" in f for f in report["findings"])
+    assert report["domain_age_days"] == 3
+
+
+def test_tls_error_is_a_finding(monkeypatch):
+    _allow_all_hosts(monkeypatch)
+
+    def ssl_fail(url):
+        raise uc.requests.exceptions.SSLError("self-signed certificate in chain")
+
+    monkeypatch.setattr(uc, "_fetch_once", ssl_fail)
+    report = check_url_sync("https://broken-tls.example")
+    assert report["status"] == "tls_error"
+    assert any("TLS certificate" in f for f in report["findings"])

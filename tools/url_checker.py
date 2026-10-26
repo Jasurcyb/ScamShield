@@ -21,6 +21,9 @@ import asyncio
 import ipaddress
 import os
 import socket
+import threading
+import time
+from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -32,6 +35,16 @@ MAX_REDIRECTS = int(os.getenv("URL_CHECK_MAX_REDIRECTS", "5"))
 MAX_BYTES = int(os.getenv("URL_CHECK_MAX_BYTES", str(64 * 1024)))
 USER_AGENT = "ScamShieldBot/2.0 (+link-verification)"
 
+# Domain-age reputation via RDAP (free, keyless). Domains younger than this
+# that imitate banks are treated as a phishing indicator.
+REPUTATION_ENABLED = os.getenv("URL_REPUTATION_ENABLED", "true").lower() in {"1", "true", "yes"}
+SUSPICIOUS_DOMAIN_AGE_DAYS = int(os.getenv("SUSPICIOUS_DOMAIN_AGE_DAYS", "30"))
+RDAP_TIMEOUT = float(os.getenv("RDAP_TIMEOUT_SECONDS", "5"))
+
+_RDAP_CACHE: dict[str, tuple[float, float]] = {}   # domain -> (age_days, fetched_at)
+_RDAP_CACHE_TTL = 6 * 3600.0
+_RDAP_LOCK = threading.Lock()
+
 SHORTENER_HOSTS = {
     "bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "buff.ly",
     "cutt.ly", "shorturl.at", "rb.gy", "rebrand.ly", "tiny.cc", "t.me",
@@ -40,6 +53,44 @@ SHORTENER_HOSTS = {
 
 def url_check_enabled() -> bool:
     return os.getenv("URL_CHECK_ENABLED", "true").lower() in {"1", "true", "yes"}
+
+
+def domain_age_days(domain: str) -> float | None:
+    """Registration age in days from RDAP (keyless). None when unknown/off.
+
+    RDAP responses are cached in-process for 6 hours to respect rate limits.
+    Failures are silent: reputation is a bonus signal, never a hard gate.
+    """
+    if not REPUTATION_ENABLED:
+        return None
+    now = time.monotonic()
+    with _RDAP_LOCK:
+        cached = _RDAP_CACHE.get(domain)
+        if cached and now - cached[1] < _RDAP_CACHE_TTL:
+            return cached[0]
+    try:
+        response = requests.get(
+            f"https://rdap.org/domain/{domain}",
+            timeout=RDAP_TIMEOUT,
+            headers={"User-Agent": USER_AGENT},
+        )
+        if response.status_code != 200:
+            return None
+        events = response.json().get("events", [])
+        registered = None
+        for event in events:
+            if event.get("eventAction") == "registration":
+                registered = event.get("eventDate")
+                break
+        if not registered:
+            return None
+        parsed = datetime.fromisoformat(registered.replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - parsed).total_seconds() / 86400.0
+    except Exception:
+        return None
+    with _RDAP_LOCK:
+        _RDAP_CACHE[domain] = (age, now)
+    return age
 
 
 def _host_is_safe(host: str) -> bool:
@@ -112,7 +163,15 @@ def check_url_sync(url: str) -> dict:
     visited = 0
     try:
         while True:
-            response = _fetch_once(current)
+            try:
+                response = _fetch_once(current)
+            except requests.exceptions.SSLError:
+                report["status"] = "tls_error"
+                report["findings"].append(
+                    "The site's TLS certificate could not be validated (self-signed, expired "
+                    "or mismatched) — legitimate banks never serve broken certificates."
+                )
+                return report
 
             if response.status_code in {301, 302, 303, 307, 308}:
                 visited += 1
@@ -162,6 +221,18 @@ def check_url_sync(url: str) -> dict:
             # Typosquat / punycode checks run on the FINAL domain, so attacks
             # hidden behind shorteners and redirects are still caught.
             report["findings"].extend(_check_url_heuristics(final_domain))
+
+            # Domain-age reputation on the FINAL domain: a days-old domain
+            # impersonating a service is a strong phishing indicator even when
+            # the name itself has no typo.
+            age = domain_age_days(final_domain)
+            if age is not None and age < SUSPICIOUS_DOMAIN_AGE_DAYS:
+                report["findings"].append(
+                    f"Domain '{final_domain}' was registered only {int(age)} days ago "
+                    f"(< {SUSPICIOUS_DOMAIN_AGE_DAYS}) — freshly registered domains are a "
+                    "common phishing trait."
+                )
+                report["domain_age_days"] = int(age)
             return report
 
     except requests.exceptions.Timeout:
