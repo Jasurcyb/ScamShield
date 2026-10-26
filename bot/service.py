@@ -19,7 +19,7 @@ from app.security import (
     get_analysis_semaphore,
     validate_uploaded_file,
 )
-from app import db
+from app import db, scoring
 from bot.localization import DEFAULT_LANGUAGE, text
 from tools.stego_tool import stego_security_tool
 from tools.vision_tool import vision_fraud_tool
@@ -29,8 +29,6 @@ router_controller = HybridRouter()
 
 _FILE_MODES = {"full", "stego", "vision"}
 _TEXT_MODES = {"full", "text"}
-
-_RISK_PROBABILITY = {"critical": 95, "high": 80, "medium": 55, "low": 15, "unknown": 0}
 
 
 def _analysis_slot():
@@ -80,7 +78,9 @@ def _wrap_single_tool_result(agent_name: str, report: dict[str, Any]) -> dict[st
     """Present a single-tool (mode-restricted) result in the router's response shape."""
     return {
         "overall_risk": _risk_key(report),
-        "fraud_probability": _RISK_PROBABILITY.get(report.get("risk_level", "unknown"), 0),
+        "fraud_probability": scoring.fraud_probability(
+            report.get("risk_level", "unknown"), scoring.count_findings({"agent": report})
+        ),
         "agent_reports": {agent_name: report},
         "final_summary": report.get("summary", ""),
         "router_metadata": {

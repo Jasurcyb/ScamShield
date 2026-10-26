@@ -12,6 +12,7 @@ from tools.stego_tool import stego_security_tool
 from tools.vision_tool import vision_fraud_tool
 from tools.text_url_tool import text_url_fraud_tool
 from tools.llm_provider import call_text_llm, best_remote_text_provider, summary_language_instruction
+from app import scoring
 
 class HybridRouter:
     def __init__(self):
@@ -40,15 +41,9 @@ class HybridRouter:
             )
         return provider
 
-    def _calculate_fraud_probability(self, overall_risk: str) -> int:
-        mapping = {
-            "critical": 95,
-            "high": 80,
-            "medium": 55,
-            "low": 15,
-            "unknown": 0
-        }
-        return mapping.get(overall_risk, 0)
+    def _calculate_fraud_probability(self, overall_risk: str, n_findings: int = 0) -> int:
+        """Calibrated probability (eval-derived), not a hand-written table."""
+        return scoring.fraud_probability(overall_risk, n_findings)
 
     async def _generate_final_summary(self, agent_reports: dict, provider: str, language: str = "en") -> str:
         """Synthesize agent findings into a single final verdict using the chosen provider."""
@@ -154,7 +149,9 @@ without using overly technical jargon. Do not use formatting like markdown or li
         if max_risk_val == 0:
             overall_risk = "unknown"
 
-        fraud_probability = self._calculate_fraud_probability(overall_risk)
+        fraud_probability = self._calculate_fraud_probability(
+            overall_risk, scoring.count_findings(agent_reports)
+        )
         final_summary = await self._generate_final_summary(agent_reports, routed_provider, language)
 
         # Metadata metrics

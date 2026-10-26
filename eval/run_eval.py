@@ -108,6 +108,15 @@ def main() -> int:
                         help="also evaluate the full pipeline with a cloud LLM (spends credits)")
     args = parser.parse_args()
 
+    # Reproducibility: never hit live links or RDAP during evaluation; the LLM
+    # judges the TEXT while deterministic layers are scored on their own.
+    os.environ.setdefault("URL_CHECK_ENABLED", "false")
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_ROOT / ".env")
+    except ImportError:
+        pass
+
     dataset_path = Path(__file__).resolve().parent / "dataset.jsonl"
     cases = load_dataset(dataset_path)
 
