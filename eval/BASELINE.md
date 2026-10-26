@@ -22,6 +22,25 @@ An eval-driven fix shipped with this baseline: whitelisted bank domains no longe
 flag as typosquats of other whitelisted banks (`nbu.uz` vs `xb..uz` short-name
 collisions produced 3 false positives before the fix; precision was 92.1%).
 
+## LLM layer status (full-pipeline run, 2026-10-26)
+
+`python eval/run_eval.py --with-llm` was executed against the configured
+Fireworks key and **could not produce LLM verdicts**: the provider returned
+`401 The API key you provided is invalid` on the models endpoint and
+`404 model not found` on chat completions (both the primary gemma-4-31b-it and
+the deepseek-v4-flash fallback). Every full-pipeline case therefore degraded
+to the graceful path.
+
+Consequences, stated plainly:
+- The numbers above measure the **deterministic layer only**. Full-pipeline
+  (LLM) accuracy is currently UNMEASURED — it requires a valid provider key
+  (Fireworks, Gemini or Anthropic) before `--with-llm` is meaningful.
+- Runtime behaviour with a dead key is graceful, not silent: text cases with
+  URLs still get heuristic findings and an elevated risk; cases with no
+  deterministic signal return `unknown` with an explanatory summary.
+- Action item: replace `FIREWORKS_API_KEY` in `.env` (or set `GEMINI_API_KEY` /
+  `ANTHROPIC_API_KEY`), then re-run `--with-llm` and record the numbers here.
+
 ## LSB stego detector calibration
 
 The detector was rebuilt from a naive ratio window (0.499–0.501) into a
