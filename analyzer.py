@@ -157,26 +157,89 @@ def check_pdf_scripts(file_path: str) -> dict:
     except Exception as e:
         return {"status": "error", "details": f"Ошибка при анализе PDF: {e}"}
 
+# LSB detector thresholds, calibrated on JPEG-realistic clean vs embedded
+# images (see eval/calibrate_stego.py).
+#
+# Fundamental limit: on sensor-noisy regions a clean LSB plane and a random
+# embedded payload are statistically indistinguishable. The usable signal is
+# in SMOOTH regions of compressed images, where a natural LSB plane is
+# correlated; replacing it with a payload drives lag-1 autocorrelation to ~0.
+LSB_BLOCK = 16
+LSB_SMOOTH_STD_MAX = 4.0      # a block counts as "smooth" below this std
+LSB_MIN_SMOOTH_BITS = 20000   # need enough smooth-plane bits to trust the test
+LSB_AUTOCORR_MAX = 0.05       # embedded payload destroys natural correlation
+
+
+def _lsb_stats(blue_channel) -> tuple:
+    """Stats over LSBs of SMOOTH blocks only.
+
+    Returns (ones_ratio, chi2 p-value of uniformity, lag-1 autocorrelation,
+    n_smooth_bits). Smooth blocks are where a natural (compressed) image has a
+    correlated LSB plane; random payload makes it white noise.
+    """
+    blue = blue_channel.astype(np.float64)
+    h, w = blue.shape
+    chunks = []
+    for i in range(0, h - LSB_BLOCK + 1, LSB_BLOCK):
+        for j in range(0, w - LSB_BLOCK + 1, LSB_BLOCK):
+            block = blue[i:i + LSB_BLOCK, j:j + LSB_BLOCK]
+            if block.std() <= LSB_SMOOTH_STD_MAX:
+                chunks.append((block % 2).ravel())
+    if not chunks:
+        return 0.5, 0.0, 1.0, 0
+    lsbs = np.concatenate(chunks)
+    n = lsbs.size
+    ones = lsbs.sum()
+    ratio = ones / n
+    expected = n / 2.0
+    chi2 = ((ones - expected) ** 2 + ((n - ones) - expected) ** 2) / expected
+    p_uniform = float(chi2_sf(chi2, 1))
+    if n > 1:
+        autocorr = float(np.corrcoef(lsbs[:-1], lsbs[1:])[0, 1])
+        if not np.isfinite(autocorr):
+            autocorr = 1.0
+    else:
+        autocorr = 1.0
+    return float(ratio), p_uniform, autocorr, n
+
+
+def chi2_sf(x, df):
+    """Survival function of chi-square without importing scipy.stats eagerly."""
+    from scipy.stats import chi2 as _chi2
+    return _chi2.sf(x, df)
+
+
 def check_lsb_anomaly(file_path: str) -> dict:
     """
-    Математический анализ LSB (младших битов) в синем канале изображения.
+    Блочный статистический анализ LSB синего канала: в гладких регионах
+    сжатого изображения естественная LSB-плоскость коррелирована; случайная
+    закладка делает её белым шумом (автокорреляция → 0).
     """
     try:
         with Image.open(file_path) as img:
             img = img.convert('RGB')
             pixels = np.array(img)
             blue_channel = pixels[:, :, 2]
-            lsbs = blue_channel % 2
-            bits_count = lsbs.size
-            ones_ratio = np.sum(lsbs) / bits_count
-            is_suspicious = 0.499 < ones_ratio < 0.501 and bits_count > 10000
-            
-            if is_suspicious:
-                return {
+            ratio, p_uniform, autocorr, n = _lsb_stats(blue_channel)
+
+            result = {
+                "lsb_ones_ratio": round(ratio, 5),
+                "lsb_p_uniform": round(p_uniform, 6),
+                "lsb_autocorr": round(autocorr, 5),
+                "lsb_smooth_bits": n,
+            }
+
+            if n >= LSB_MIN_SMOOTH_BITS and abs(autocorr) <= LSB_AUTOCORR_MAX:
+                result.update({
                     "status": "warning",
-                    "details": f"LSB-аномалия: обнаружен неестественно равномерный шум ({round(ones_ratio*100, 2)}% бит)"
-                }
-            return {"status": "ok", "details": "LSB-анализ: аномалий не обнаружено."}
+                    "details": (
+                        f"LSB-аномалия: в гладких регионах LSB-плоскость похожа на белый шум "
+                        f"(autocorr={autocorr:.4f}, smooth_bits={n}) — признак случайной закладки"
+                    ),
+                })
+                return result
+            result.update({"status": "ok", "details": "LSB-анализ: аномалий не обнаружено."})
+            return result
     except Exception as e:
         return {"status": "ok", "details": f"LSB-анализ пропущен: {e}"}
 

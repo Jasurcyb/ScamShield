@@ -22,6 +22,25 @@ An eval-driven fix shipped with this baseline: whitelisted bank domains no longe
 flag as typosquats of other whitelisted banks (`nbu.uz` vs `xb..uz` short-name
 collisions produced 3 false positives before the fix; precision was 92.1%).
 
+## LSB stego detector calibration
+
+The detector was rebuilt from a naive ratio window (0.499–0.501) into a
+block-wise statistical test: over SMOOTH 16×16 regions of a compressed image
+(std ≤ 4.0), a natural LSB plane is correlated while a random embedded payload
+is white noise. Thresholds were set by measurement, not intuition:
+
+```
+python eval/calibrate_stego.py     # JPEG-realistic clean vs embedded scenes
+clean: autocorr[median]=+0.9362  flagged=0/24
+stego: autocorr[median]=-0.0001  flagged=24/24
+FPR=0.00%  TPR=100.00%   (document/receipt/screenshot-like scenes)
+```
+
+Documented scope limit: on sensor-noisy photographs a clean LSB plane and a
+random payload are statistically indistinguishable, so the detector is silent
+there (verified by `tests/test_lsb_detector.py::test_noisy_photo_is_not_flagged`).
+It targets ScamShield's real artifacts — screenshots, receipts, documents.
+
 ## Known limitations (the 2 misses)
 
 - `typ-020` — `ofbank.uz` vs `ofb.uz`: the length-difference guard (≤2) skips
